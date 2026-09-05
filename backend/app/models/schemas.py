@@ -25,14 +25,15 @@ class Token(BaseModel):
 # ---- Extraction (what your friends' extraction_service.py must return) ----
 
 class ExtractedFields(BaseModel):
-    manufacturer: Optional[str] = None
+    product_name: Optional[str] = None
+    mrp: Optional[float] = None
     net_quantity: Optional[str] = None
-    mfg_date: Optional[str] = None
-    mrp: Optional[str] = None
-    consumer_care: Optional[str] = None
-    best_before: Optional[str] = None
+    batch_number: Optional[str] = None
+    production_date: Optional[str] = None
+    expiry_date: Optional[str] = None
+    manufacturer: Optional[str] = None
+    manufacturer_address: Optional[str] = None
     country_of_origin: Optional[str] = None
-
 
 # ---- Rules engine output (what rules_engine.py returns) ----
 
