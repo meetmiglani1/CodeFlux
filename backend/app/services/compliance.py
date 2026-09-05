@@ -2,6 +2,7 @@ import json
 import re
 import os
 from datetime import datetime
+from app.config import settings
 
 import psycopg2
 from psycopg2.extras import Json
@@ -11,10 +12,7 @@ from psycopg2.extras import Json
 # DATABASE CONFIGURATION
 # ============================================================
 
-DB_HOST = "127.0.0.1"
-DB_PORT = 5432
-DB_NAME = "sih_db"
-DB_USER = "postgres"
+
 
 
 # ============================================================
@@ -181,12 +179,7 @@ def connect_database():
 
     try:
 
-        connection = psycopg2.connect(
-            host=DB_HOST,
-            database=DB_NAME,
-            port=DB_PORT,
-            user=DB_USER
-        )
+        connection = psycopg2.connect(settings.database_url)
 
         print("[OK] PostgreSQL connection successful")
 
@@ -198,7 +191,6 @@ def connect_database():
         print(error)
 
         return None
-
 
 # ============================================================
 # GET CATEGORY ID
