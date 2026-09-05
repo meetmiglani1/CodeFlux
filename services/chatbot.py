@@ -2,17 +2,12 @@ import json
 import urllib.request
 import urllib.error
 import psycopg2
-
+from app.config import settings
 
 # ============================================================
 # DATABASE CONFIGURATION
 # ============================================================
 
-DB_HOST = "127.0.0.1"
-DB_PORT = 5432
-DB_NAME = "sih_db"
-DB_USER = "postgres"
-DB_PASSWORD = "YOUR_POSTGRES_PASSWORD"
 
 
 # ============================================================
@@ -27,14 +22,10 @@ OLLAMA_MODEL = "llama3.2:3b"
 # DATABASE CONNECTION
 # ============================================================
 
+
+
 def get_connection():
-    return psycopg2.connect(
-        host=DB_HOST,
-        port=DB_PORT,
-        dbname=DB_NAME,
-        user=DB_USER,
-        password=DB_PASSWORD
-    )
+    return psycopg2.connect(settings.database_url)
 
 
 # ============================================================
