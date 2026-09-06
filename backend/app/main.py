@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers import auth, chat, products, report
 from app.config import settings
-
+from app.db import init_db
 app = FastAPI(
     title=settings.app_name,
     description="OCR + PostgreSQL + AI based product label compliance checker",
@@ -22,6 +22,10 @@ app.include_router(products.router)
 app.include_router(chat.router)
 app.include_router(report.router)
 
+@app.on_event("startup") 
+def on_startup():
+    init_db()
+    
 @app.get("/")
 def root():
     return {"message": settings.app_name, "status": "running"}
