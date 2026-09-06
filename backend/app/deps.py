@@ -37,18 +37,17 @@ def get_current_user(
         if user_id is None:
             raise credentials_exception
     except JWTError:
-    raise credentials_exception
+        raise credentials_exception
 
-try:
-    user = db.get(User, UUID(user_id))
-except ValueError:
-    raise credentials_exception
+    try:
+        user = db.get(User, UUID(user_id))
+    except ValueError:
+        raise credentials_exception
 
-if user is None:
-    raise credentials_exception
+    if user is None:
+        raise credentials_exception
 
     return user
-
 
 def require_role(*allowed_roles: str):
     def role_checker(current_user: User = Depends(get_current_user)) -> User:
