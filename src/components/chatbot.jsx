@@ -23,13 +23,11 @@ function Chatbot() {
 
   const [messages, setMessages] =
     useState([
-
       {
         role: "bot",
         text:
           "Hi! I'm PackSure AI Assistant. I can help explain inspection results and compliance workflow."
       }
-
     ]);
 
 
@@ -52,79 +50,176 @@ function Chatbot() {
   }, []);
 
 
-  const sendMessage = () => {
+  const sendMessage = async () => {
 
     if (!input.trim()) return;
 
-
-    const userMessage = input;
+    const userMessage = input.trim();
 
     setMessages(prev => [
-
       ...prev,
-
       {
         role: "user",
         text: userMessage
       }
-
     ]);
 
     setInput("");
 
+    const scanId =
+      localStorage.getItem("packsure_scan_id");
 
-    setTimeout(() => {
-
-      let response =
-        "I can help explain OCR results, detected declarations, compliance checks and inspection workflow.";
-
-
-      const lower =
-        userMessage.toLowerCase();
-
-
-      if (
-        lower.includes("score")
-      ) {
-
-        response =
-          "The compliance score summarizes the preliminary rule checks. Items marked Review should be verified by an authorized officer.";
-
-      }
-
-
-      if (
-        lower.includes("ocr")
-      ) {
-
-        response =
-          "OCR extracts readable text from uploaded product or label images. The extracted information is then passed to the compliance rules engine.";
-
-      }
-
-
-      if (
-        lower.includes("mrp")
-      ) {
-
-        response =
-          "MRP information can be extracted from the label and checked against the applicable declaration requirements.";
-
-      }
-
+    if (!scanId) {
 
       setMessages(prev => [
-
         ...prev,
-
         {
           role: "bot",
-          text: response
+          text:
+            "Please run a compliance inspection first. I need the inspection scan ID to answer questions about the scanned product."
         }
-
       ]);
 
-    }, 500);
+      return;
+    }
+
+
+    setMessages(prev => [
+      ...prev,
+      {
+        role: "bot",
+        text:
+          "Checking the inspection results..."
+      }
+    ]);
+
+
+    try {
+
+      const response =
+        await fetch(
+          "http://192.168.1.87:8000/chat",
+          {
+            method: "POST",
+
+            headers: {
+              "Content-Type":
+                "application/json"
+            },
+
+            body: JSON.stringify({
+              question: userMessage,
+              scan_id: Number(scanId)
+            })
+          }
+        );
+
+
+      let result;
+
+
+      try {
+
+        result =
+          await response.json();
+
+      } catch {
+
+        throw new Error(
+          "Backend returned an invalid response."
+        );
+
+      }
+
+
+      if (
+        !response.ok ||
+        !result.success
+      ) {
+
+        throw new Error(
+          result?.detail ||
+          "Chat request failed."
+        );
+
+      }
+
+
+      setMessages(prev => {
+
+        const updated =
+          [...prev];
+
+        // Replace the temporary loading message
+        const lastBotIndex =
+          updated
+            .map(message => message.role)
+            .lastIndexOf("bot");
+
+
+        if (lastBotIndex !== -1) {
+
+          updated[lastBotIndex] = {
+            role: "bot",
+            text:
+              result.answer ||
+              "No answer was returned."
+          };
+
+        }
+
+
+        return updated;
+
+      });
+
+
+    } catch (error) {
+
+      console.error(
+        "Chat API error:",
+        error
+      );
+
+
+      setMessages(prev => {
+
+        const updated =
+          [...prev];
+
+
+        const lastBotIndex =
+          updated
+            .map(message => message.role)
+            .lastIndexOf("bot");
+
+
+        const errorMessage = {
+          role: "bot",
+          text:
+            `I couldn't reach the compliance assistant. ${error.message}`
+        };
+
+
+        if (lastBotIndex !== -1) {
+
+          updated[lastBotIndex] =
+            errorMessage;
+
+        } else {
+
+          updated.push(
+            errorMessage
+          );
+
+        }
+
+
+        return updated;
+
+      });
+
+    }
 
   };
 
@@ -149,19 +244,23 @@ function Chatbot() {
     const recognition =
       new SpeechRecognition();
 
+
     recognition.lang =
       "en-IN";
+
 
     recognition.start();
 
 
-    recognition.onresult = event => {
+    recognition.onresult =
+      event => {
 
-      setInput(
-        event.results[0][0].transcript
-      );
+        setInput(
+          event.results[0][0]
+            .transcript
+        );
 
-    };
+      };
 
   };
 
@@ -177,8 +276,10 @@ function Chatbot() {
           text
         );
 
+
       utterance.lang =
         "en-IN";
+
 
       window.speechSynthesis.speak(
         utterance
@@ -218,6 +319,8 @@ function Chatbot() {
           dark:text-white
           "
         >
+
+          {/* Header */}
 
           <div
             className="
@@ -262,11 +365,23 @@ function Chatbot() {
 
               <div>
 
-                <p className="text-sm font-bold">
+                <p
+                  className="
+                  text-sm
+                  font-bold
+                  "
+                >
                   PackSure AI
                 </p>
 
-                <p className="text-[10px] text-emerald-600 dark:text-emerald-400">
+
+                <p
+                  className="
+                  text-[10px]
+                  text-emerald-600
+                  dark:text-emerald-400
+                  "
+                >
                   Assistant online
                 </p>
 
@@ -276,6 +391,7 @@ function Chatbot() {
 
 
             <button
+              type="button"
               onClick={() =>
                 setOpen(false)
               }
@@ -297,6 +413,8 @@ function Chatbot() {
 
           </div>
 
+
+          {/* Messages */}
 
           <div
             className="
@@ -344,11 +462,13 @@ function Chatbot() {
                     {message.role === "bot" && (
 
                       <button
+                        type="button"
                         onClick={() =>
                           speak(
                             message.text
                           )
                         }
+                        aria-label="Read message aloud"
                         className="
                         ml-2
                         inline-flex
@@ -375,6 +495,8 @@ function Chatbot() {
           </div>
 
 
+          {/* Input */}
+
           <div
             className="
             border-t
@@ -400,7 +522,11 @@ function Chatbot() {
                   if (
                     e.key === "Enter"
                   ) {
+
+                    e.preventDefault();
+
                     sendMessage();
+
                   }
 
                 }}
@@ -428,7 +554,9 @@ function Chatbot() {
 
 
               <button
+                type="button"
                 onClick={voiceInput}
+                aria-label="Voice input"
                 className="
                 rounded-xl
                 border
@@ -451,7 +579,9 @@ function Chatbot() {
 
 
               <button
+                type="button"
                 onClick={sendMessage}
+                aria-label="Send message"
                 className="
                 rounded-xl
                 bg-blue-600
@@ -487,9 +617,17 @@ function Chatbot() {
       )}
 
 
+      {/* Floating Chat Button */}
+
       <button
+        type="button"
         onClick={() =>
           setOpen(!open)
+        }
+        aria-label={
+          open
+            ? "Close PackSure AI"
+            : "Open PackSure AI"
         }
         className="
         fixed
@@ -521,6 +659,7 @@ function Chatbot() {
     </>
 
   );
+
 }
 
 

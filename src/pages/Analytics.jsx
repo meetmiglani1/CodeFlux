@@ -1,4 +1,3 @@
-
 import React from "react";
 import {
   TrendingUp,
@@ -32,70 +31,501 @@ import {
 import { getInspections } from "../utils/storage";
 
 
-const weeklyData = [
-  { day: "Mon", score: 78, inspections: 142 },
-  { day: "Tue", score: 82, inspections: 168 },
-  { day: "Wed", score: 80, inspections: 155 },
-  { day: "Thu", score: 86, inspections: 181 },
-  { day: "Fri", score: 84, inspections: 193 },
-  { day: "Sat", score: 89, inspections: 207 },
-  { day: "Sun", score: 87, inspections: 202 }
-];
+/* ============================================================
+   DATE PARSER
+============================================================ */
 
+function parseInspectionDate(item) {
+  const raw =
+    item?.date ??
+    item?.createdAt ??
+    item?.created ??
+    item?.timestamp;
 
-const categoryData = [
-  {
-    category: "Packaged Items",
-    score: 92
-  },
-  {
-    category: "Cosmetics",
-    score: 86
-  },
-  {
-    category: "Pharma",
-    score: 74
-  },
-  {
-    category: "Stationery",
-    score: 91
-  },
-  {
-    category: "Electronics",
-    score: 83
+  if (!raw) return null;
+
+  // Handle DD/MM/YYYY format
+  if (
+    typeof raw === "string" &&
+    /^\d{2}\/\d{2}\/\d{4}$/.test(raw)
+  ) {
+    const [dd, mm, yyyy] = raw.split("/");
+
+    const date = new Date(
+      `${yyyy}-${mm}-${dd}T12:00:00`
+    );
+
+    return Number.isNaN(date.getTime()) ? null : date;
   }
-];
+
+  const date = new Date(raw);
+
+  return Number.isNaN(date.getTime()) ? null : date;
+}
 
 
-const monthlyData = [
-  { month: "Apr", score: 76 },
-  { month: "May", score: 79 },
-  { month: "Jun", score: 81 },
-  { month: "Jul", score: 80 },
-  { month: "Aug", score: 84 },
-  { month: "Sep", score: 87 }
-];
+/* ============================================================
+   NORMALIZE INSPECTION
+============================================================ */
 
+function normalizeInspection(item = {}) {
+  const parsedScore = Number(
+    item?.score ??
+      item?.compliance_score ??
+      item?.compliance?.compliance_score ??
+      0
+  );
+
+  const status = String(
+    item?.status ??
+      item?.overall_status ??
+      item?.compliance?.overall_status ??
+      ""
+  )
+    .trim()
+    .toUpperCase();
+
+  const risk = String(
+    item?.risk_level ??
+      item?.risk ??
+      item?.compliance?.risk_level ??
+      ""
+  )
+    .trim()
+    .toUpperCase();
+
+  const category = String(
+    item?.category ??
+      item?.product_category ??
+      item?.compliance?.category ??
+      "Unknown"
+  ).trim();
+
+  return {
+    ...item,
+
+    score: Number.isFinite(parsedScore)
+      ? Math.max(0, Math.min(100, parsedScore))
+      : 0,
+
+    status,
+    risk,
+    category,
+
+    parsedDate: parseInspectionDate(item)
+  };
+}
+
+
+/* ============================================================
+   AVERAGE
+============================================================ */
+
+function average(values) {
+  return values.length
+    ? values.reduce(
+        (sum, value) => sum + value,
+        0
+      ) / values.length
+    : 0;
+}
+
+
+/* ============================================================
+   FORMAT PERCENT
+============================================================ */
+
+function formatPercent(value) {
+  return `${Number(value || 0).toFixed(1)}%`;
+}
+
+
+/* ============================================================
+   GET OUTCOME
+============================================================ */
+
+function getOutcome(item) {
+  if (
+    item.risk === "HIGH" ||
+    item.risk === "HIGH_RISK" ||
+    item.risk === "HIGH RISK"
+  ) {
+    return "HIGH";
+  }
+
+  if (
+    item.status === "COMPLIANT" ||
+    item.risk === "LOW"
+  ) {
+    return "COMPLIANT";
+  }
+
+  return "REVIEW";
+}
+
+
+/* ============================================================
+   BUILD DAILY DATA
+============================================================ */
+
+function buildDailyData(items) {
+  const dated = items
+    .filter(
+      (item) =>
+        item.parsedDate &&
+        item.score > 0
+    )
+    .sort(
+      (a, b) =>
+        a.parsedDate - b.parsedDate
+    );
+
+  /*
+    If there are no valid dates,
+    show the last 7 scored inspections.
+  */
+
+  if (!dated.length) {
+    return items
+      .filter((item) => item.score > 0)
+      .slice(-7)
+      .map((item, index) => ({
+        day: `Scan ${index + 1}`,
+        score: Number(
+          item.score.toFixed(1)
+        ),
+        inspections: 1
+      }));
+  }
+
+  const groups = new Map();
+
+  dated.forEach((item) => {
+    const key =
+      item.parsedDate
+        .toISOString()
+        .slice(0, 10);
+
+    if (!groups.has(key)) {
+      groups.set(key, []);
+    }
+
+    groups
+      .get(key)
+      .push(item.score);
+  });
+
+  return Array.from(groups.entries())
+    .slice(-7)
+    .map(([key, scores]) => {
+      const date = new Date(
+        `${key}T12:00:00`
+      );
+
+      return {
+        day: date.toLocaleDateString(
+          "en-IN",
+          {
+            day: "2-digit",
+            month: "short"
+          }
+        ),
+
+        score: Number(
+          average(scores).toFixed(1)
+        ),
+
+        inspections: scores.length
+      };
+    });
+}
+
+
+/* ============================================================
+   BUILD CATEGORY DATA
+============================================================ */
+
+function buildCategoryData(items) {
+  const groups = new Map();
+
+  items
+    .filter((item) => item.score > 0)
+    .forEach((item) => {
+      const category =
+        item.category || "Unknown";
+
+      if (!groups.has(category)) {
+        groups.set(category, []);
+      }
+
+      groups
+        .get(category)
+        .push(item.score);
+    });
+
+  return Array.from(groups.entries())
+    .map(([category, scores]) => ({
+      category,
+
+      score: Number(
+        average(scores).toFixed(1)
+      ),
+
+      inspections: scores.length
+    }))
+    .sort(
+      (a, b) =>
+        b.score - a.score
+    );
+}
+
+
+/* ============================================================
+   BUILD MONTHLY DATA
+============================================================ */
+
+function buildMonthlyData(items) {
+  const groups = new Map();
+
+  items
+    .filter(
+      (item) =>
+        item.parsedDate &&
+        item.score > 0
+    )
+    .forEach((item) => {
+      const year =
+        item.parsedDate.getFullYear();
+
+      const month =
+        item.parsedDate.getMonth();
+
+      const key = `${year}-${String(
+        month + 1
+      ).padStart(2, "0")}`;
+
+      if (!groups.has(key)) {
+        groups.set(key, []);
+      }
+
+      groups
+        .get(key)
+        .push(item.score);
+    });
+
+  return Array.from(groups.entries())
+    .sort(([a], [b]) =>
+      a.localeCompare(b)
+    )
+    .slice(-6)
+    .map(([key, scores]) => {
+      const [year, month] =
+        key.split("-").map(Number);
+
+      const date = new Date(
+        year,
+        month - 1,
+        1
+      );
+
+      return {
+        month: date.toLocaleDateString(
+          "en-IN",
+          {
+            month: "short"
+          }
+        ),
+
+        score: Number(
+          average(scores).toFixed(1)
+        )
+      };
+    });
+}
+
+
+/* ============================================================
+   ANALYTICS
+============================================================ */
 
 function Analytics() {
-
-  const [inspections, setInspections] = React.useState([]);
+  const [inspections, setInspections] =
+    React.useState([]);
 
   React.useEffect(() => {
-    setInspections(getInspections());
+    try {
+      const savedInspections =
+        getInspections();
+
+      setInspections(
+        Array.isArray(savedInspections)
+          ? savedInspections
+          : []
+      );
+    } catch (error) {
+      console.error(
+        "Failed to load inspections:",
+        error
+      );
+
+      setInspections([]);
+    }
   }, []);
 
 
-  const totalInspections = 1248;
-  const compliant = 987;
-  const review = 183;
-  const highRisk = 78;
-  const averageScore = 84.2;
+  /* ==========================================================
+     NORMALIZED DATA
+  ========================================================== */
+
+  const normalizedInspections =
+    inspections.map(
+      normalizeInspection
+    );
+
+
+  /* ==========================================================
+     KPI CALCULATIONS
+  ========================================================== */
+
+  const totalInspections =
+    normalizedInspections.length;
+
+  const compliant =
+    normalizedInspections.filter(
+      (item) =>
+        getOutcome(item) ===
+        "COMPLIANT"
+    ).length;
+
+  const highRisk =
+    normalizedInspections.filter(
+      (item) =>
+        getOutcome(item) === "HIGH"
+    ).length;
+
+  const review =
+    normalizedInspections.filter(
+      (item) =>
+        getOutcome(item) === "REVIEW"
+    ).length;
+
+
+  const scoredInspections =
+    normalizedInspections.filter(
+      (item) => item.score > 0
+    );
+
+  const averageScore = average(
+    scoredInspections.map(
+      (item) => item.score
+    )
+  );
+
+
+  /* ==========================================================
+     CHART DATA
+  ========================================================== */
+
+  const weeklyData =
+    buildDailyData(
+      normalizedInspections
+    );
+
+  const categoryData =
+    buildCategoryData(
+      normalizedInspections
+    );
+
+  const monthlyData =
+    buildMonthlyData(
+      normalizedInspections
+    );
+
+
+  /* ==========================================================
+     SCORE STATS
+  ========================================================== */
+
+  const bestScore =
+    scoredInspections.length
+      ? Math.max(
+          ...scoredInspections.map(
+            (item) => item.score
+          )
+        )
+      : 0;
+
+  const lowestScore =
+    scoredInspections.length
+      ? Math.min(
+          ...scoredInspections.map(
+            (item) => item.score
+          )
+        )
+      : 0;
+
+
+  const trendChange =
+    weeklyData.length >= 2
+      ? weeklyData[
+          weeklyData.length - 1
+        ].score -
+        weeklyData[0].score
+      : 0;
+
+
+  const complianceRate =
+    totalInspections
+      ? (compliant /
+          totalInspections) *
+        100
+      : 0;
+
+
+  /* ==========================================================
+     LOWEST CATEGORY
+  ========================================================== */
+
+  const riskCategory =
+    categoryData.length
+      ? categoryData.reduce(
+          (lowest, item) =>
+            item.score <
+            lowest.score
+              ? item
+              : lowest,
+          categoryData[0]
+        )
+      : null;
+
+
+  /* ==========================================================
+     AI INSIGHT
+  ========================================================== */
+
+  const insightText = !totalInspections
+    ? "No inspection records are available yet. Run a compliance inspection to populate analytics."
+    : riskCategory
+      ? `${riskCategory.category} currently has the lowest average compliance score at ${riskCategory.score}%. Consider prioritizing these inspections for review.`
+      : `Your current compliance rate is ${formatPercent(
+          complianceRate
+        )} across ${totalInspections} recorded inspections.`;
+
+
+  const insightChangeText =
+    weeklyData.length >= 2
+      ? `${
+          trendChange >= 0
+            ? "+"
+            : ""
+        }${trendChange.toFixed(
+          1
+        )} pts`
+      : "Live data";
 
 
   return (
     <div className="min-h-screen space-y-6 pb-10">
-
 
       {/* =====================================================
           HEADER
@@ -168,8 +598,10 @@ function Analytics() {
             text-slate-500
             dark:text-slate-400
           ">
-            Understand compliance performance, identify risk patterns,
-            and make faster regulatory decisions.
+            Understand compliance performance,
+            identify risk patterns,
+            and make faster regulatory
+            decisions.
           </p>
 
         </div>
@@ -194,6 +626,7 @@ function Analytics() {
           dark:bg-slate-900
           dark:text-slate-300
         ">
+
           <CalendarDays
             size={15}
             className="text-blue-500"
@@ -210,6 +643,7 @@ function Analytics() {
           " />
 
           Updated today
+
         </div>
 
       </div>
@@ -258,7 +692,11 @@ function Analytics() {
           md:justify-between
         ">
 
-          <div className="flex items-start gap-4">
+          <div className="
+            flex
+            items-start
+            gap-4
+          ">
 
             <div className="
               flex
@@ -296,9 +734,7 @@ function Analytics() {
                 text-slate-500
                 dark:text-slate-400
               ">
-                Compliance performance improved by 4.8% compared
-                with the previous reporting period. Pharma inspections
-                currently show the highest risk concentration.
+                {insightText}
               </p>
 
             </div>
@@ -322,8 +758,15 @@ function Analytics() {
             dark:bg-slate-800
             dark:text-emerald-400
           ">
-            <TrendingUp size={14} />
-            +4.8% improvement
+
+            {trendChange >= 0 ? (
+              <TrendingUp size={14} />
+            ) : (
+              <TrendingDown size={14} />
+            )}
+
+            {insightChangeText}
+
           </div>
 
         </div>
@@ -346,14 +789,16 @@ function Analytics() {
           title="Total Inspections"
           value={totalInspections.toLocaleString()}
           subtitle="All recorded inspections"
-          icon={<ClipboardCheck size={20} />}
+          icon={
+            <ClipboardCheck size={20} />
+          }
           iconClass="
             bg-blue-50
             text-blue-600
             dark:bg-blue-950/40
             dark:text-blue-400
           "
-          trend="+12.5%"
+          trend="Live"
           positive
         />
 
@@ -361,15 +806,19 @@ function Analytics() {
         <MetricCard
           title="Compliant"
           value={compliant.toLocaleString()}
-          subtitle="79% of total inspections"
-          icon={<ShieldCheck size={20} />}
+          subtitle={`${formatPercent(
+            complianceRate
+          )} of total inspections`}
+          icon={
+            <ShieldCheck size={20} />
+          }
           iconClass="
             bg-emerald-50
             text-emerald-600
             dark:bg-emerald-950/40
             dark:text-emerald-400
           "
-          trend="+8.2%"
+          trend="Live"
           positive
         />
 
@@ -378,30 +827,36 @@ function Analytics() {
           title="Needs Review"
           value={review.toLocaleString()}
           subtitle="Requires officer attention"
-          icon={<AlertTriangle size={20} />}
+          icon={
+            <AlertTriangle size={20} />
+          }
           iconClass="
             bg-amber-50
             text-amber-600
             dark:bg-amber-950/40
             dark:text-amber-400
           "
-          trend="-3.4%"
+          trend="Live"
           positive
         />
 
 
         <MetricCard
           title="Average Score"
-          value={`${averageScore}%`}
+          value={formatPercent(
+            averageScore
+          )}
           subtitle="Overall compliance health"
-          icon={<Target size={20} />}
+          icon={
+            <Target size={20} />
+          }
           iconClass="
             bg-violet-50
             text-violet-600
             dark:bg-violet-950/40
             dark:text-violet-400
           "
-          trend="+4.8%"
+          trend="Live"
           positive
         />
 
@@ -475,7 +930,7 @@ function Analytics() {
                   text-xs
                   text-slate-400
                 ">
-                  Daily compliance score trend
+                  Recent compliance score trend
                 </p>
 
               </div>
@@ -485,7 +940,11 @@ function Analytics() {
           </div>
 
 
-          <div className="flex items-center gap-3">
+          <div className="
+            flex
+            items-center
+            gap-3
+          ">
 
             <div className="
               flex
@@ -501,6 +960,7 @@ function Analytics() {
               dark:bg-emerald-950/30
               dark:text-emerald-400
             ">
+
               <span className="
                 h-2
                 w-2
@@ -508,7 +968,8 @@ function Analytics() {
                 bg-emerald-500
               " />
 
-              Healthy trend
+              Live data
+
             </div>
 
           </div>
@@ -607,7 +1068,8 @@ function Analytics() {
                 <Tooltip
                   cursor={{
                     stroke: "#94a3b8",
-                    strokeDasharray: "4 4"
+                    strokeDasharray:
+                      "4 4"
                   }}
                   contentStyle={{
                     backgroundColor:
@@ -626,7 +1088,7 @@ function Analytics() {
                     color:
                       "var(--chart-tooltip-text)"
                   }}
-                  formatter={(value, name) => [
+                  formatter={(value) => [
                     `${value}%`,
                     "Compliance"
                   ]}
@@ -670,26 +1132,49 @@ function Analytics() {
 
             <MiniStat
               label="Best day"
-              value="89%"
-              icon={<TrendingUp size={13} />}
+              value={formatPercent(
+                bestScore
+              )}
+              icon={
+                <TrendingUp size={13} />
+              }
             />
+
 
             <MiniStat
               label="Lowest day"
-              value="78%"
-              icon={<TrendingDown size={13} />}
+              value={formatPercent(
+                lowestScore
+              )}
+              icon={
+                <TrendingDown size={13} />
+              }
             />
+
 
             <MiniStat
               label="Average"
-              value="83.7%"
-              icon={<Activity size={13} />}
+              value={formatPercent(
+                averageScore
+              )}
+              icon={
+                <Activity size={13} />
+              }
             />
+
 
             <MiniStat
               label="Growth"
-              value="+4.8%"
-              icon={<ArrowUpRight size={13} />}
+              value={`${
+                trendChange >= 0
+                  ? "+"
+                  : ""
+              }${trendChange.toFixed(
+                1
+              )} pts`}
+              icon={
+                <ArrowUpRight size={13} />
+              }
             />
 
           </div>
@@ -750,6 +1235,7 @@ function Analytics() {
               </p>
 
             </div>
+
 
             <div className="
               flex
@@ -820,13 +1306,17 @@ function Analytics() {
                     fontSize: 11,
                     fontWeight: 600
                   }}
-                  className="text-slate-500 dark:text-slate-400"
+                  className="
+                    text-slate-500
+                    dark:text-slate-400
+                  "
                 />
 
 
                 <Tooltip
                   cursor={{
-                    fill: "rgba(148,163,184,0.08)"
+                    fill:
+                      "rgba(148,163,184,0.08)"
                   }}
                   contentStyle={{
                     backgroundColor:
@@ -846,14 +1336,19 @@ function Analytics() {
 
                 <Bar
                   dataKey="score"
-                  radius={[0, 8, 8, 0]}
+                  radius={[
+                    0,
+                    8,
+                    8,
+                    0
+                  ]}
                   barSize={20}
                 >
 
                   {categoryData.map(
                     (item, index) => (
                       <Cell
-                        key={index}
+                        key={`${item.category}-${index}`}
                         fill={
                           item.score >= 90
                             ? "#10b981"
@@ -916,6 +1411,7 @@ function Analytics() {
               </p>
 
             </div>
+
 
             <div className="
               flex
@@ -1097,7 +1593,8 @@ function Analytics() {
               text-xs
               text-slate-400
             ">
-              Current distribution of inspection outcomes
+              Current distribution of inspection
+              outcomes
             </p>
 
           </div>
@@ -1117,8 +1614,13 @@ function Analytics() {
             dark:bg-slate-800
             dark:text-slate-300
           ">
+
             <Activity size={14} />
-            1,248 total
+
+            {totalInspections.toLocaleString()}
+
+            {" "}total
+
           </div>
 
         </div>
@@ -1131,30 +1633,50 @@ function Analytics() {
         ">
 
           <HealthCard
-            icon={<CheckCircle2 size={19} />}
+            icon={
+              <CheckCircle2 size={19} />
+            }
             title="Compliant"
-            value="987"
-            percentage="79%"
+            value={compliant.toLocaleString()}
+            percentage={formatPercent(
+              complianceRate
+            )}
             description="Strong regulatory adherence"
             type="green"
           />
 
 
           <HealthCard
-            icon={<CircleAlert size={19} />}
+            icon={
+              <CircleAlert size={19} />
+            }
             title="Needs Review"
-            value="183"
-            percentage="15%"
+            value={review.toLocaleString()}
+            percentage={formatPercent(
+              totalInspections
+                ? (review /
+                    totalInspections) *
+                    100
+                : 0
+            )}
             description="Requires further verification"
             type="yellow"
           />
 
 
           <HealthCard
-            icon={<AlertTriangle size={19} />}
+            icon={
+              <AlertTriangle size={19} />
+            }
             title="High Risk"
-            value="78"
-            percentage="6%"
+            value={highRisk.toLocaleString()}
+            percentage={formatPercent(
+              totalInspections
+                ? (highRisk /
+                    totalInspections) *
+                    100
+                : 0
+            )}
             description="Immediate attention recommended"
             type="red"
           />
@@ -1216,7 +1738,8 @@ function Analytics() {
             text-[11px]
             text-slate-400
           ">
-            Data is synchronized with the latest inspection records.
+            Data is synchronized with the
+            latest inspection records.
           </div>
 
         </div>
@@ -1231,6 +1754,7 @@ function Analytics() {
           text-emerald-600
           dark:text-emerald-400
         ">
+
           <span className="
             h-2
             w-2
@@ -1240,6 +1764,7 @@ function Analytics() {
           " />
 
           Live
+
         </div>
 
       </div>
@@ -1262,7 +1787,6 @@ function MetricCard({
   trend,
   positive
 }) {
-
   return (
     <div className="
       group
@@ -1286,39 +1810,48 @@ function MetricCard({
         justify-between
       ">
 
-        <div className={`
-          flex
-          h-11
-          w-11
-          items-center
-          justify-center
-          rounded-xl
-          ${iconClass}
-        `}>
+        <div
+          className={`
+            flex
+            h-11
+            w-11
+            items-center
+            justify-center
+            rounded-xl
+            ${iconClass}
+          `}
+        >
           {icon}
         </div>
 
 
-        <div className={`
-          flex
-          items-center
-          gap-1
-          rounded-full
-          px-2
-          py-1
-          text-[10px]
-          font-black
-          ${
-            positive
-              ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-400"
-              : "bg-rose-50 text-rose-600 dark:bg-rose-950/30 dark:text-rose-400"
-          }
-        `}>
+        <div
+          className={`
+            flex
+            items-center
+            gap-1
+            rounded-full
+            px-2
+            py-1
+            text-[10px]
+            font-black
+            ${
+              trend === "Live"
+                ? "bg-blue-50 text-blue-600 dark:bg-blue-950/30 dark:text-blue-400"
+                : positive
+                  ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-400"
+                  : "bg-rose-50 text-rose-600 dark:bg-rose-950/30 dark:text-rose-400"
+            }
+          `}
+        >
 
-          {positive
-            ? <TrendingUp size={11} />
-            : <TrendingDown size={11} />
-          }
+          {trend === "Live" ? (
+            <Activity size={11} />
+          ) : positive ? (
+            <TrendingUp size={11} />
+          ) : (
+            <TrendingDown size={11} />
+          )}
 
           {trend}
 
@@ -1375,7 +1908,6 @@ function MiniStat({
   value,
   icon
 }) {
-
   return (
     <div className="
       flex
@@ -1437,38 +1969,48 @@ function HealthCard({
   description,
   type
 }) {
-
   const styles = {
 
     green: {
       wrapper:
         "border-emerald-200 bg-emerald-50/60 dark:border-emerald-900/50 dark:bg-emerald-950/20",
+
       icon:
         "bg-emerald-100 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400",
+
       text:
         "text-emerald-600 dark:text-emerald-400",
+
       bar:
         "bg-emerald-500"
     },
 
+
     yellow: {
       wrapper:
         "border-amber-200 bg-amber-50/60 dark:border-amber-900/50 dark:bg-amber-950/20",
+
       icon:
         "bg-amber-100 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400",
+
       text:
         "text-amber-600 dark:text-amber-400",
+
       bar:
         "bg-amber-500"
     },
 
+
     red: {
       wrapper:
         "border-rose-200 bg-rose-50/60 dark:border-rose-900/50 dark:bg-rose-950/20",
+
       icon:
         "bg-rose-100 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400",
+
       text:
         "text-rose-600 dark:text-rose-400",
+
       bar:
         "bg-rose-500"
     }
@@ -1476,16 +2018,24 @@ function HealthCard({
   };
 
 
-  const current = styles[type];
+  const current =
+    styles[type] || styles.green;
 
+
+  /*
+    percentage comes in as "85.5%".
+    This is valid for CSS width.
+  */
 
   return (
-    <div className={`
-      rounded-2xl
-      border
-      p-5
-      ${current.wrapper}
-    `}>
+    <div
+      className={`
+        rounded-2xl
+        border
+        p-5
+        ${current.wrapper}
+      `}
+    >
 
       <div className="
         flex
@@ -1493,24 +2043,28 @@ function HealthCard({
         justify-between
       ">
 
-        <div className={`
-          flex
-          h-10
-          w-10
-          items-center
-          justify-center
-          rounded-xl
-          ${current.icon}
-        `}>
+        <div
+          className={`
+            flex
+            h-10
+            w-10
+            items-center
+            justify-center
+            rounded-xl
+            ${current.icon}
+          `}
+        >
           {icon}
         </div>
 
 
-        <span className={`
-          text-xl
-          font-black
-          ${current.text}
-        `}>
+        <span
+          className={`
+            text-xl
+            font-black
+            ${current.text}
+          `}
+        >
           {percentage}
         </span>
 
@@ -1580,5 +2134,8 @@ function HealthCard({
 }
 
 
-export default Analytics;
+/* ============================================================
+   EXPORT
+============================================================ */
 
+export default Analytics;

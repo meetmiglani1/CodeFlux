@@ -22,7 +22,7 @@ import History from "./pages/History";
 import Analytics from "./pages/Analytics";
 import Reports from "./pages/Reports";
 import ReportPreview from "./pages/ReportPreview";
-import Settings from "./pages/Settings";
+import Settings from "./pages/settings";
 import Help from "./pages/Help";
 
 

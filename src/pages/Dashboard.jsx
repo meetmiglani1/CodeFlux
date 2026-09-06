@@ -1,5 +1,6 @@
 
 import React from "react";
+
 import {
   ShieldCheck,
   ClipboardCheck,
@@ -33,47 +34,127 @@ import {
 import { useNavigate } from "react-router-dom";
 import { getInspections } from "../utils/storage";
 
-const chartData = [
-  { day: "Mon", score: 78 },
-  { day: "Tue", score: 82 },
-  { day: "Wed", score: 80 },
-  { day: "Thu", score: 86 },
-  { day: "Fri", score: 84 },
-  { day: "Sat", score: 89 },
-  { day: "Sun", score: 87 }
-];
-
-const riskData = [
-  {
-    label: "Compliant",
-    value: 79,
-    count: 987,
-    dot: "bg-emerald-500"
-  },
-  {
-    label: "Review",
-    value: 15,
-    count: 183,
-    dot: "bg-amber-500"
-  },
-  {
-    label: "High Risk",
-    value: 6,
-    count: 78,
-    dot: "bg-rose-500"
-  }
-];
-
 function Dashboard() {
   const navigate = useNavigate();
 
   const [inspections, setInspections] = React.useState([]);
 
   React.useEffect(() => {
-    setInspections(getInspections());
+    const savedInspections = getInspections();
+
+    setInspections(
+      Array.isArray(savedInspections) ? savedInspections : []
+    );
   }, []);
 
-  const recentInspections = inspections.slice(0, 4);
+  const normalizedInspections = inspections.map((item) => {
+    const score = Number(
+      item?.score ??
+        item?.compliance_score ??
+        item?.compliance?.compliance_score ??
+        0
+    );
+
+    const status = String(
+      item?.status ??
+        item?.overall_status ??
+        item?.compliance?.overall_status ??
+        ""
+    )
+      .trim()
+      .toUpperCase();
+
+    const risk = String(
+      item?.risk_level ??
+        item?.risk ??
+        item?.compliance?.risk_level ??
+        ""
+    )
+      .trim()
+      .toUpperCase();
+
+    return {
+      ...item,
+      score: Number.isFinite(score) ? score : 0,
+      status,
+      risk
+    };
+  });
+
+  const recentInspections = normalizedInspections.slice(0, 4);
+
+  const totalInspections = normalizedInspections.length;
+
+  const compliantCount = normalizedInspections.filter(
+    (item) =>
+      item.status === "COMPLIANT" ||
+      item.status === "COMPLIANT"
+  ).length;
+
+  const highRiskCount = normalizedInspections.filter(
+    (item) =>
+      item.risk === "HIGH" ||
+      item.status === "HIGH RISK" ||
+      item.status === "NON_COMPLIANT" ||
+      item.status === "NON-COMPLIANT"
+  ).length;
+
+  const reviewCount = Math.max(
+    0,
+    totalInspections - compliantCount - highRiskCount
+  );
+
+  const scored = normalizedInspections.filter(
+    (item) => item.score > 0
+  );
+
+  const averageScore = scored.length
+    ? scored.reduce((sum, item) => sum + item.score, 0) /
+      scored.length
+    : 0;
+
+  const complianceRate = totalInspections
+    ? (compliantCount / totalInspections) * 100
+    : 0;
+
+  const riskData = [
+    {
+      label: "Compliant",
+      value: totalInspections
+        ? Math.round((compliantCount / totalInspections) * 100)
+        : 0,
+      count: compliantCount,
+      dot: "bg-emerald-500"
+    },
+    {
+      label: "Review",
+      value: totalInspections
+        ? Math.round((reviewCount / totalInspections) * 100)
+        : 0,
+      count: reviewCount,
+      dot: "bg-amber-500"
+    },
+    {
+      label: "High Risk",
+      value: totalInspections
+        ? Math.round((highRiskCount / totalInspections) * 100)
+        : 0,
+      count: highRiskCount,
+      dot: "bg-rose-500"
+    }
+  ];
+
+  const chartData = normalizedInspections
+    .slice()
+    .reverse()
+    .slice(-7)
+    .map((item, index) => ({
+      day:
+        item.date ||
+        item.createdAt ||
+        `Scan ${index + 1}`,
+      score: item.score
+    }));
 
   return (
     <div className="min-h-screen space-y-6 pb-10">
@@ -81,6 +162,7 @@ function Dashboard() {
       {/* =====================================================
           HEADER
       ===================================================== */}
+
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
 
         <div>
@@ -163,6 +245,7 @@ function Dashboard() {
       {/* =====================================================
           HERO COMPLIANCE CARD
       ===================================================== */}
+
       <section className="
         relative
         overflow-hidden
@@ -176,7 +259,6 @@ function Dashboard() {
         dark:bg-slate-900
       ">
 
-        {/* Decorative background */}
         <div className="
           pointer-events-none
           absolute
@@ -257,8 +339,9 @@ function Dashboard() {
               text-slate-500
               dark:text-slate-400
             ">
-              AI analysis shows a strong compliance trend across recent
-              inspections. A few high-risk observations need attention.
+              Dashboard insights are calculated from your saved
+              inspections. Review recent scans and focus on failed
+              or high-risk cases.
             </p>
 
             <div className="mt-6 flex flex-wrap gap-3">
@@ -316,6 +399,7 @@ function Dashboard() {
 
 
           {/* SCORE */}
+
           <div className="flex justify-center lg:justify-end">
 
             <div className="relative flex h-52 w-52 items-center justify-center">
@@ -351,7 +435,7 @@ function Dashboard() {
                   text-slate-900
                   dark:text-white
                 ">
-                  84.2
+                  {averageScore.toFixed(1)}
                 </div>
 
                 <div className="
@@ -385,7 +469,9 @@ function Dashboard() {
                 </div>
 
               </div>
+
             </div>
+
           </div>
 
         </div>
@@ -395,6 +481,7 @@ function Dashboard() {
       {/* =====================================================
           KPI CARDS
       ===================================================== */}
+
       <div className="
         grid
         gap-4
@@ -405,36 +492,36 @@ function Dashboard() {
         <StatCard
           icon={<ClipboardCheck size={21} />}
           label="Total Inspections"
-          value="1,248"
-          trend="+12.5%"
-          description="vs last month"
+          value={totalInspections}
+          trend="Live"
+          description="saved inspections"
           iconClass="bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400"
         />
 
         <StatCard
           icon={<ShieldCheck size={21} />}
           label="Compliant"
-          value="987"
-          trend="+8.2%"
-          description="compliance rate"
+          value={compliantCount}
+          trend={`${complianceRate.toFixed(1)}%`}
+          description="compliant inspections"
           iconClass="bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400"
         />
 
         <StatCard
           icon={<AlertTriangle size={21} />}
           label="Needs Review"
-          value="183"
-          trend="-3.4%"
-          description="pending attention"
+          value={reviewCount}
+          trend="Live"
+          description="needs attention"
           iconClass="bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400"
         />
 
         <StatCard
           icon={<Activity size={21} />}
           label="Avg. Compliance"
-          value="84.2%"
-          trend="+4.8%"
-          description="overall performance"
+          value={`${averageScore.toFixed(1)}%`}
+          trend="Live"
+          description="average score"
           iconClass="bg-violet-50 text-violet-600 dark:bg-violet-950/40 dark:text-violet-400"
         />
 
@@ -444,6 +531,7 @@ function Dashboard() {
       {/* =====================================================
           MAIN ANALYTICS GRID
       ===================================================== */}
+
       <div className="
         grid
         gap-6
@@ -451,6 +539,7 @@ function Dashboard() {
       ">
 
         {/* TREND CHART */}
+
         <section className="
           rounded-3xl
           border
@@ -473,6 +562,7 @@ function Dashboard() {
           ">
 
             <div>
+
               <div className="
                 flex
                 items-center
@@ -486,6 +576,7 @@ function Dashboard() {
                   size={18}
                   className="text-blue-500"
                 />
+
                 Compliance Trend
               </div>
 
@@ -495,8 +586,9 @@ function Dashboard() {
                 text-slate-500
                 dark:text-slate-400
               ">
-                Performance score over the last 7 days
+                Performance score from recent inspections
               </p>
+
             </div>
 
             <div className="
@@ -514,18 +606,25 @@ function Dashboard() {
               dark:text-emerald-400
             ">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-              Improving
+
+              {scored.length > 1
+                ? "Live data"
+                : "Waiting for scans"}
             </div>
 
           </div>
 
           <div className="h-[280px] w-full">
 
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer
+              width="100%"
+              height="100%"
+            >
 
               <AreaChart data={chartData}>
 
                 <defs>
+
                   <linearGradient
                     id="complianceGradient"
                     x1="0"
@@ -533,6 +632,7 @@ function Dashboard() {
                     x2="0"
                     y2="1"
                   >
+
                     <stop
                       offset="0%"
                       stopColor="#3b82f6"
@@ -544,7 +644,9 @@ function Dashboard() {
                       stopColor="#3b82f6"
                       stopOpacity={0}
                     />
+
                   </linearGradient>
+
                 </defs>
 
                 <CartesianGrid
@@ -565,7 +667,7 @@ function Dashboard() {
                 />
 
                 <YAxis
-                  domain={[60, 100]}
+                  domain={[0, 100]}
                   tickLine={false}
                   axisLine={false}
                   tick={{
@@ -617,6 +719,7 @@ function Dashboard() {
 
 
         {/* RISK DISTRIBUTION */}
+
         <section className="
           rounded-3xl
           border
@@ -658,10 +761,11 @@ function Dashboard() {
 
           </div>
 
-          {/* Visual bars */}
+
           <div className="space-y-5">
 
             {riskData.map((risk) => (
+
               <div key={risk.label}>
 
                 <div className="
@@ -735,6 +839,7 @@ function Dashboard() {
                 </div>
 
               </div>
+
             ))}
 
           </div>
@@ -775,6 +880,7 @@ function Dashboard() {
       {/* =====================================================
           LOWER GRID
       ===================================================== */}
+
       <div className="
         grid
         gap-6
@@ -782,6 +888,7 @@ function Dashboard() {
       ">
 
         {/* RECENT INSPECTIONS */}
+
         <section className="
           overflow-hidden
           rounded-3xl
@@ -853,13 +960,18 @@ function Dashboard() {
           </div>
 
 
-          <div className="divide-y divide-slate-100 dark:divide-slate-800">
+          <div className="
+            divide-y
+            divide-slate-100
+            dark:divide-slate-800
+          ">
 
             {recentInspections.length > 0 ? (
-              recentInspections.map((item) => (
+
+              recentInspections.map((item, index) => (
 
                 <div
-                  key={item.id}
+                  key={item.id || `inspection-${index}`}
                   className="
                     group
                     flex
@@ -900,7 +1012,7 @@ function Dashboard() {
                         text-slate-900
                         dark:text-white
                       ">
-                        {item.product}
+                        {item.product || "Unknown Product"}
                       </div>
 
                       <div className="
@@ -913,16 +1025,18 @@ function Dashboard() {
                         text-slate-400
                       ">
 
-                        <span>{item.id}</span>
+                        <span>
+                          {item.id || "N/A"}
+                        </span>
 
                         <span className="flex items-center gap-1">
                           <MapPin size={11} />
-                          {item.location}
+                          {item.location || "Location unavailable"}
                         </span>
 
                         <span className="flex items-center gap-1">
                           <Clock3 size={11} />
-                          {item.date}
+                          {item.date || "Date unavailable"}
                         </span>
 
                       </div>
@@ -932,7 +1046,13 @@ function Dashboard() {
                   </div>
 
 
-                  <div className="flex items-center justify-between gap-4 sm:justify-end">
+                  <div className="
+                    flex
+                    items-center
+                    justify-between
+                    gap-4
+                    sm:justify-end
+                  ">
 
                     <div className="text-right">
 
@@ -957,15 +1077,18 @@ function Dashboard() {
 
                     </div>
 
-
-                    <StatusBadge status={item.status} />
+                    <StatusBadge
+                      status={item.status}
+                    />
 
                   </div>
 
                 </div>
 
               ))
+
             ) : (
+
               <div className="
                 p-10
                 text-center
@@ -974,6 +1097,7 @@ function Dashboard() {
               ">
                 No inspections available.
               </div>
+
             )}
 
           </div>
@@ -982,6 +1106,7 @@ function Dashboard() {
 
 
         {/* AI ASSISTANT */}
+
         <section className="
           relative
           overflow-hidden
@@ -1004,7 +1129,7 @@ function Dashboard() {
             rounded-full
             bg-blue-500/20
             blur-3xl
-          />
+          " />
 
           <div className="
             pointer-events-none
@@ -1016,7 +1141,7 @@ function Dashboard() {
             rounded-full
             bg-violet-500
             blur-3xl
-          />
+          " />
 
           <div className="relative">
 
@@ -1071,9 +1196,13 @@ function Dashboard() {
               leading-6
               text-slate-400
             ">
-              78 inspections are currently classified as high risk.
-              Prioritizing these cases could significantly improve
-              your overall compliance performance.
+              {highRiskCount > 0
+                ? `${highRiskCount} inspection${
+                    highRiskCount === 1 ? "" : "s"
+                  } ${
+                    highRiskCount === 1 ? "is" : "are"
+                  } currently classified as high risk. Prioritizing these cases could improve your overall compliance performance.`
+                : "No high-risk inspections are currently recorded. Keep monitoring new scans and address failed rules promptly."}
             </p>
 
             <button
@@ -1109,6 +1238,7 @@ function Dashboard() {
       {/* =====================================================
           QUICK ACTIONS
       ===================================================== */}
+
       <section>
 
         <div className="mb-4">
@@ -1145,7 +1275,9 @@ function Dashboard() {
             icon={<ScanLine size={20} />}
             title="New Inspection"
             description="Start AI screening"
-            onClick={() => navigate("/inspection/new")}
+            onClick={() =>
+              navigate("/inspection/new")
+            }
             iconClass="bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400"
           />
 
@@ -1153,7 +1285,9 @@ function Dashboard() {
             icon={<ClipboardCheck size={20} />}
             title="Inspection History"
             description="Browse previous checks"
-            onClick={() => navigate("/history")}
+            onClick={() =>
+              navigate("/history")
+            }
             iconClass="bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400"
           />
 
@@ -1161,7 +1295,9 @@ function Dashboard() {
             icon={<FileText size={20} />}
             title="Generate Report"
             description="Create compliance report"
-            onClick={() => navigate("/reports")}
+            onClick={() =>
+              navigate("/reports")
+            }
             iconClass="bg-violet-50 text-violet-600 dark:bg-violet-950/40 dark:text-violet-400"
           />
 
@@ -1221,15 +1357,17 @@ function StatCard({
         justify-between
       ">
 
-        <div className={`
-          flex
-          h-11
-          w-11
-          items-center
-          justify-center
-          rounded-xl
-          ${iconClass}
-        `}>
+        <div
+          className={`
+            flex
+            h-11
+            w-11
+            items-center
+            justify-center
+            rounded-xl
+            ${iconClass}
+          `}
+        >
           {icon}
         </div>
 
@@ -1303,6 +1441,22 @@ function StatCard({
 ============================================================ */
 
 function StatusBadge({ status }) {
+  const normalized = String(status || "Review")
+    .trim()
+    .toUpperCase();
+
+  let displayStatus = "Review";
+
+  if (normalized === "COMPLIANT") {
+    displayStatus = "Compliant";
+  } else if (
+    normalized === "NON_COMPLIANT" ||
+    normalized === "NON-COMPLIANT" ||
+    normalized === "HIGH RISK" ||
+    normalized === "HIGH_RISK"
+  ) {
+    displayStatus = "High Risk";
+  }
 
   const styles = {
     Compliant:
@@ -1322,19 +1476,21 @@ function StatusBadge({ status }) {
   };
 
   return (
-    <span className={`
-      inline-flex
-      items-center
-      gap-1.5
-      rounded-full
-      px-2.5
-      py-1.5
-      text-[10px]
-      font-black
-      ${styles[status] || styles.Review}
-    `}>
-      {icons[status] || icons.Review}
-      {status}
+    <span
+      className={`
+        inline-flex
+        items-center
+        gap-1.5
+        rounded-full
+        px-2.5
+        py-1.5
+        text-[10px]
+        font-black
+        ${styles[displayStatus]}
+      `}
+    >
+      {icons[displayStatus]}
+      {displayStatus}
     </span>
   );
 }
@@ -1375,16 +1531,18 @@ function QuickAction({
       "
     >
 
-      <div className={`
-        flex
-        h-11
-        w-11
-        shrink-0
-        items-center
-        justify-center
-        rounded-xl
-        ${iconClass}
-      `}>
+      <div
+        className={`
+          flex
+          h-11
+          w-11
+          shrink-0
+          items-center
+          justify-center
+          rounded-xl
+          ${iconClass}
+        `}
+      >
         {icon}
       </div>
 
@@ -1427,4 +1585,5 @@ function QuickAction({
 }
 
 export default Dashboard;
+
 

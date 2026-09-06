@@ -1,7 +1,4 @@
-import React, {
-  useEffect,
-  useState
-} from "react";
+import React, { useEffect, useState } from "react";
 
 import {
   FileText,
@@ -12,9 +9,7 @@ import {
   CheckCircle2
 } from "lucide-react";
 
-import {
-  useNavigate
-} from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 
 import {
   getReports,
@@ -22,280 +17,850 @@ import {
   getInspections
 } from "../utils/storage";
 
+// --------------------------------------------------
+// Parse inspection date safely
+// --------------------------------------------------
+
+function parseInspectionDate(item) {
+  const raw =
+    item?.date ??
+    item?.createdAt ??
+    item?.created ??
+    item?.timestamp;
+
+  if (!raw) {
+    return null;
+  }
+
+  // DD/MM/YYYY
+  if (
+    typeof raw === "string" &&
+    /^\d{2}\/\d{2}\/\d{4}$/.test(raw)
+  ) {
+    const [dd, mm, yyyy] = raw.split("/");
+
+    const date = new Date(
+      `${yyyy}-${mm}-${dd}T12:00:00`
+    );
+
+    return Number.isNaN(date.getTime())
+      ? null
+      : date;
+  }
+
+  const date = new Date(raw);
+
+  return Number.isNaN(date.getTime())
+    ? null
+    : date;
+}
+
+// --------------------------------------------------
+// Get inspection score safely
+// --------------------------------------------------
+
+function getInspectionScore(item) {
+  const score = Number(
+    item?.score ??
+      item?.compliance_score ??
+      item?.compliance?.compliance_score ??
+      0
+  );
+
+  if (!Number.isFinite(score)) {
+    return 0;
+  }
+
+  return Math.max(
+    0,
+    Math.min(100, score)
+  );
+}
+
+// --------------------------------------------------
+// Filter inspections by date
+// --------------------------------------------------
+
+function filterInspectionsByDate(
+  inspections,
+  from,
+  to
+) {
+  const safeInspections = Array.isArray(
+    inspections
+  )
+    ? inspections
+    : [];
+
+  const start = from
+    ? new Date(`${from}T00:00:00`)
+    : null;
+
+  const end = to
+    ? new Date(`${to}T23:59:59.999`)
+    : null;
+
+  return safeInspections.filter((item) => {
+    if (!start && !end) {
+      return true;
+    }
+
+    const date = parseInspectionDate(item);
+
+    if (!date) {
+      return false;
+    }
+
+    if (start && date < start) {
+      return false;
+    }
+
+    if (end && date > end) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
+// --------------------------------------------------
+// Escape HTML before inserting user data
+// --------------------------------------------------
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+// --------------------------------------------------
+// Safe storage readers
+// --------------------------------------------------
+
+function readReports() {
+  try {
+    const data = getReports();
+
+    return Array.isArray(data)
+      ? data
+      : [];
+  } catch (error) {
+    console.error(
+      "Error loading reports:",
+      error
+    );
+
+    return [];
+  }
+}
+
+function readInspections() {
+  try {
+    const data = getInspections();
+
+    return Array.isArray(data)
+      ? data
+      : [];
+  } catch (error) {
+    console.error(
+      "Error loading inspections:",
+      error
+    );
+
+    return [];
+  }
+}
+
+// --------------------------------------------------
+// Reports Component
+// --------------------------------------------------
 
 function Reports() {
-
   const navigate = useNavigate();
 
-  const [reports, setReports] =
-    useState([]);
+  const [reports, setReports] = useState([]);
 
-  const [reportType, setReportType] =
-    useState("Compliance Summary");
+  const [reportType, setReportType] = useState(
+    "Compliance Summary"
+  );
 
-  const [from, setFrom] =
-    useState("");
+  const [from, setFrom] = useState("");
 
-  const [to, setTo] =
-    useState("");
+  const [to, setTo] = useState("");
 
   const [showModal, setShowModal] =
     useState(false);
 
+  // --------------------------------------------------
+  // Load reports
+  // --------------------------------------------------
 
   useEffect(() => {
-
-    setReports(
-      getReports()
-    );
-
+    setReports(readReports());
   }, []);
 
+  // --------------------------------------------------
+  // Generate Report
+  // --------------------------------------------------
 
   const generateReport = () => {
+    // Validate dates
+    if (from && to && from > to) {
+      window.alert(
+        "The From date cannot be later than the To date."
+      );
 
-    const inspections =
-      getInspections();
+      return;
+    }
 
+    const allInspections =
+      readInspections();
+
+    const filteredInspections =
+      filterInspectionsByDate(
+        allInspections,
+        from,
+        to
+      );
+
+    const scores =
+      filteredInspections.map(
+        getInspectionScore
+      );
+
+    const averageScore =
+      scores.length > 0
+        ? Math.round(
+            scores.reduce(
+              (sum, score) =>
+                sum + score,
+              0
+            ) / scores.length
+          )
+        : 0;
 
     const report = {
-
-      id:
-        "RPT-" +
-        Date.now()
-          .toString()
-          .slice(-7),
+      id: `RPT-${Date.now()
+        .toString()
+        .slice(-7)}`,
 
       type: reportType,
 
-      from:
-        from || "All dates",
+      from: from || "All dates",
 
-      to:
-        to || "Present",
+      to: to || "Present",
 
       created:
-        new Date()
-          .toLocaleDateString(
-            "en-IN"
-          ),
+        new Date().toLocaleDateString(
+          "en-IN"
+        ),
 
       inspections:
-        inspections.length,
+        filteredInspections.length,
 
-      score:
-        inspections.length
-          ? Math.round(
-              inspections.reduce(
-                (sum, item) =>
-                  sum + item.score,
-                0
-              ) /
-                inspections.length
-            )
-          : 0,
+      score: averageScore,
+
+      inspectionIds:
+        filteredInspections
+          .map((item) => item?.id)
+          .filter(
+            (id) =>
+              id !== undefined &&
+              id !== null
+          ),
 
       status: "Generated"
-
     };
 
+    try {
+      saveReport(report);
 
-    saveReport(report);
+      setReports(readReports());
 
-    setReports(
-      getReports()
-    );
+      setShowModal(false);
 
-    setShowModal(false);
+      // Reset filters after generation
+      setFrom("");
+      setTo("");
 
+      window.alert(
+        "Report generated successfully."
+      );
+    } catch (error) {
+      console.error(
+        "Error saving report:",
+        error
+      );
+
+      window.alert(
+        "Unable to save the report. Please try again."
+      );
+    }
   };
 
+  // --------------------------------------------------
+  // Download Report
+  // --------------------------------------------------
 
-  const downloadReport = report => {
+  const downloadReport = (report) => {
+    if (!report) {
+      return;
+    }
 
-    const inspections =
-      getInspections();
+    const allInspections =
+      readInspections();
 
+    let inspections = [];
+
+    // ------------------------------------------------
+    // New reports:
+    // Use exact inspection IDs
+    // ------------------------------------------------
+
+    if (
+      Array.isArray(
+        report.inspectionIds
+      )
+    ) {
+      const selectedIds =
+        new Set(
+          report.inspectionIds.map(
+            (id) => String(id)
+          )
+        );
+
+      inspections =
+        allInspections.filter((item) =>
+          selectedIds.has(
+            String(item?.id)
+          )
+        );
+    }
+
+    // ------------------------------------------------
+    // Old reports:
+    // Use date filtering
+    // ------------------------------------------------
+
+    else {
+      const reportFrom =
+        /^\d{4}-\d{2}-\d{2}$/.test(
+          String(report.from || "")
+        )
+          ? report.from
+          : "";
+
+      const reportTo =
+        /^\d{4}-\d{2}-\d{2}$/.test(
+          String(report.to || "")
+        )
+          ? report.to
+          : "";
+
+      inspections =
+        filterInspectionsByDate(
+          allInspections,
+          reportFrom,
+          reportTo
+        );
+    }
+
+    // ------------------------------------------------
+    // Create table rows
+    // ------------------------------------------------
+
+    const tableRows =
+      inspections.length > 0
+        ? inspections
+            .map((item) => {
+              const score =
+                getInspectionScore(
+                  item
+                );
+
+              return `
+                <tr>
+                  <td>
+                    ${escapeHtml(
+                      item?.id ||
+                        "N/A"
+                    )}
+                  </td>
+
+                  <td>
+                    ${escapeHtml(
+                      item?.product ||
+                        "Unknown Product"
+                    )}
+                  </td>
+
+                  <td>
+                    ${escapeHtml(
+                      item?.category ||
+                        "N/A"
+                    )}
+                  </td>
+
+                  <td>
+                    ${score.toFixed(1)}%
+                  </td>
+
+                  <td>
+                    ${escapeHtml(
+                      item?.status ||
+                        "N/A"
+                    )}
+                  </td>
+                </tr>
+              `;
+            })
+            .join("")
+        : `
+            <tr>
+              <td
+                colspan="5"
+                style="
+                  text-align:center;
+                  padding:20px;
+                "
+              >
+                No inspection records found.
+              </td>
+            </tr>
+          `;
+
+    // ------------------------------------------------
+    // Create HTML report
+    // ------------------------------------------------
 
     const html = `
+<!DOCTYPE html>
 
-      <!DOCTYPE html>
+<html lang="en">
 
-      <html>
+<head>
 
-      <head>
+  <meta charset="UTF-8" />
 
-        <title>
-          ${report.id} - PackSure AI
-        </title>
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  />
 
-        <style>
+  <title>
+    ${escapeHtml(
+      report.id || "Report"
+    )} - PackSure AI
+  </title>
 
-          body {
-            font-family: Arial, sans-serif;
-            padding: 40px;
-            color: #111827;
-          }
+  <style>
 
-          h1 {
-            color: #1d4ed8;
-          }
+    * {
+      box-sizing: border-box;
+    }
 
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 25px;
-          }
+    body {
+      font-family:
+        Arial,
+        Helvetica,
+        sans-serif;
 
-          th, td {
-            border: 1px solid #d1d5db;
-            padding: 10px;
-            text-align: left;
-          }
+      padding: 40px;
 
-          th {
-            background: #f3f4f6;
-          }
+      color: #111827;
 
-        </style>
+      background: #ffffff;
 
-      </head>
+      line-height: 1.6;
+    }
 
-      <body>
+    .header {
+      border-bottom:
+        3px solid #2563eb;
 
-        <h1>PackSure AI</h1>
+      padding-bottom: 20px;
 
-        <h2>${report.type}</h2>
+      margin-bottom: 30px;
+    }
 
-        <p>
-          Report ID: ${report.id}
-        </p>
+    h1 {
+      margin: 0;
 
-        <p>
-          Generated: ${report.created}
-        </p>
+      color: #1d4ed8;
 
-        <p>
-          Period: ${report.from}
-          to
-          ${report.to}
-        </p>
+      font-size: 30px;
+    }
 
-        <p>
-          Total Inspections:
-          ${report.inspections}
-        </p>
+    h2 {
+      margin-top: 10px;
 
-        <p>
-          Average Compliance:
-          ${report.score}%
-        </p>
+      color: #111827;
 
-        <table>
+      font-size: 22px;
+    }
 
-          <tr>
-            <th>ID</th>
-            <th>Product</th>
-            <th>Category</th>
-            <th>Score</th>
-            <th>Status</th>
-          </tr>
+    .info {
+      display: grid;
 
-          ${inspections
-            .map(
-              item => `
+      grid-template-columns:
+        repeat(2, minmax(0, 1fr));
 
-              <tr>
+      gap: 15px;
 
-                <td>
-                  ${item.id}
-                </td>
+      margin-top: 25px;
+    }
 
-                <td>
-                  ${item.product}
-                </td>
+    .info-card {
+      padding: 15px;
 
-                <td>
-                  ${item.category}
-                </td>
+      border:
+        1px solid #e5e7eb;
 
-                <td>
-                  ${item.score}%
-                </td>
+      border-radius: 10px;
 
-                <td>
-                  ${item.status}
-                </td>
+      background: #f9fafb;
+    }
 
-              </tr>
+    .label {
+      font-size: 12px;
 
-            `
-            )
-            .join("")}
+      text-transform: uppercase;
 
-        </table>
+      color: #6b7280;
 
-        <br />
+      font-weight: bold;
+    }
 
-        <p>
-          PackSure AI provides preliminary
-          screening and decision support.
-          Final statutory assessment should
-          be verified by an authorized officer.
-        </p>
+    .value {
+      margin-top: 4px;
 
-      </body>
+      font-size: 17px;
 
-      </html>
+      font-weight: bold;
+    }
 
-    `;
+    table {
+      width: 100%;
+
+      border-collapse: collapse;
+
+      margin-top: 30px;
+    }
+
+    th,
+    td {
+      border:
+        1px solid #d1d5db;
+
+      padding: 11px;
+
+      text-align: left;
+    }
+
+    th {
+      background: #f3f4f6;
+
+      font-size: 13px;
+
+      text-transform: uppercase;
+    }
+
+    td {
+      font-size: 14px;
+    }
+
+    .footer {
+      margin-top: 40px;
+
+      padding-top: 20px;
+
+      border-top:
+        1px solid #e5e7eb;
+
+      color: #6b7280;
+
+      font-size: 12px;
+    }
+
+    @media print {
+
+      body {
+        padding: 20px;
+      }
+
+    }
+
+  </style>
+
+</head>
+
+<body>
+
+  <div class="header">
+
+    <h1>
+      PackSure AI
+    </h1>
+
+    <h2>
+      ${escapeHtml(
+        report.type ||
+          "Compliance Report"
+      )}
+    </h2>
+
+    <p>
+      Automated compliance inspection report
+    </p>
+
+  </div>
 
 
-    const blob =
-      new Blob(
+  <div class="info">
+
+    <div class="info-card">
+
+      <div class="label">
+        Report ID
+      </div>
+
+      <div class="value">
+        ${escapeHtml(
+          report.id ||
+            "N/A"
+        )}
+      </div>
+
+    </div>
+
+
+    <div class="info-card">
+
+      <div class="label">
+        Generated
+      </div>
+
+      <div class="value">
+        ${escapeHtml(
+          report.created ||
+            "N/A"
+        )}
+      </div>
+
+    </div>
+
+
+    <div class="info-card">
+
+      <div class="label">
+        Period
+      </div>
+
+      <div class="value">
+        ${escapeHtml(
+          report.from ||
+            "All dates"
+        )}
+        -
+        ${escapeHtml(
+          report.to ||
+            "Present"
+        )}
+      </div>
+
+    </div>
+
+
+    <div class="info-card">
+
+      <div class="label">
+        Total Inspections
+      </div>
+
+      <div class="value">
+        ${Number(
+          report.inspections || 0
+        )}
+      </div>
+
+    </div>
+
+
+    <div class="info-card">
+
+      <div class="label">
+        Average Compliance
+      </div>
+
+      <div class="value">
+        ${Number(
+          report.score || 0
+        )}%
+      </div>
+
+    </div>
+
+  </div>
+
+
+  <h2>
+    Inspection Details
+  </h2>
+
+
+  <table>
+
+    <thead>
+
+      <tr>
+
+        <th>
+          ID
+        </th>
+
+        <th>
+          Product
+        </th>
+
+        <th>
+          Category
+        </th>
+
+        <th>
+          Score
+        </th>
+
+        <th>
+          Status
+        </th>
+
+      </tr>
+
+    </thead>
+
+
+    <tbody>
+
+      ${tableRows}
+
+    </tbody>
+
+  </table>
+
+
+  <div class="footer">
+
+    <p>
+      PackSure AI provides preliminary
+      screening and decision support.
+      Final statutory assessment should
+      be verified by an authorized officer.
+    </p>
+
+    <p>
+      Generated automatically by PackSure AI.
+    </p>
+
+  </div>
+
+</body>
+
+</html>
+`;
+
+    // ------------------------------------------------
+    // Create downloadable file
+    // ------------------------------------------------
+
+    try {
+      const blob = new Blob(
         [html],
         {
-          type:
-            "text/html"
+          type: "text/html"
         }
       );
 
+      const url =
+        URL.createObjectURL(
+          blob
+        );
 
-    const url =
-      URL.createObjectURL(
-        blob
+      const link =
+        document.createElement(
+          "a"
+        );
+
+      link.href = url;
+
+      const safeFileName =
+        String(
+          report.id ||
+            "PackSure-Report"
+        ).replace(
+          /[^a-zA-Z0-9_-]/g,
+          "_"
+        );
+
+      link.download =
+        `${safeFileName}.html`;
+
+      document.body.appendChild(
+        link
       );
 
+      link.click();
 
-    const link =
-      document.createElement(
-        "a"
+      document.body.removeChild(
+        link
       );
 
-    link.href = url;
+      setTimeout(() => {
+        URL.revokeObjectURL(
+          url
+        );
+      }, 1000);
+    } catch (error) {
+      console.error(
+        "Download error:",
+        error
+      );
 
-    link.download =
-      `${report.id}.html`;
-
-    link.click();
-
-    URL.revokeObjectURL(url);
-
+      window.alert(
+        "Unable to download the report."
+      );
+    }
   };
 
+  // --------------------------------------------------
+  // Close modal
+  // --------------------------------------------------
+
+  const closeModal = () => {
+    setShowModal(false);
+  };
+
+  // --------------------------------------------------
+  // JSX
+  // --------------------------------------------------
 
   return (
-
     <div className="mx-auto max-w-7xl">
+
+      {/* -------------------------------------------- */}
+      {/* Header */}
+      {/* -------------------------------------------- */}
 
       <div
         className="
-        flex
-        flex-col
-        justify-between
-        gap-4
-        md:flex-row
-        md:items-center
+          flex
+          flex-col
+          justify-between
+          gap-4
+          md:flex-row
+          md:items-center
         "
       >
 
@@ -303,12 +868,12 @@ function Reports() {
 
           <p
             className="
-            text-xs
-            font-bold
-            uppercase
-            tracking-widest
-            text-blue-600
-            dark:text-blue-400
+              text-xs
+              font-bold
+              uppercase
+              tracking-widest
+              text-blue-600
+              dark:text-blue-400
             "
           >
             Documents
@@ -316,11 +881,11 @@ function Reports() {
 
           <h1
             className="
-            mt-2
-            text-3xl
-            font-black
-            text-slate-900
-            dark:text-white
+              mt-2
+              text-3xl
+              font-black
+              text-slate-900
+              dark:text-white
             "
           >
             Reports
@@ -328,36 +893,39 @@ function Reports() {
 
           <p
             className="
-            mt-2
-            text-sm
-            text-slate-600
-            dark:text-slate-500
+              mt-2
+              text-sm
+              text-slate-600
+              dark:text-slate-400
             "
           >
-            Generate, view and export inspection
-            reports.
+            Generate, view and export
+            inspection reports.
           </p>
 
         </div>
 
 
         <button
+          type="button"
           onClick={() =>
             setShowModal(true)
           }
           className="
-          flex
-          items-center
-          justify-center
-          gap-2
-          rounded-xl
-          bg-blue-600
-          px-5
-          py-3
-          text-sm
-          font-bold
-          text-white
-          hover:bg-blue-500
+            flex
+            items-center
+            justify-center
+            gap-2
+            rounded-xl
+            bg-blue-600
+            px-5
+            py-3
+            text-sm
+            font-bold
+            text-white
+            transition
+            hover:bg-blue-500
+            active:scale-[0.98]
           "
         >
 
@@ -370,34 +938,44 @@ function Reports() {
       </div>
 
 
+      {/* -------------------------------------------- */}
+      {/* Information Banner */}
+      {/* -------------------------------------------- */}
+
       <div
         className="
-        mt-7
-        rounded-3xl
-        border
-        border-blue-200
-        bg-blue-50
-        p-6
-        dark:border-blue-500/20
-        dark:bg-blue-500/5
+          mt-7
+          rounded-3xl
+          border
+          border-blue-200
+          bg-blue-50
+          p-6
+          dark:border-blue-500/20
+          dark:bg-blue-500/5
         "
       >
 
-        <div className="flex items-start gap-4">
+        <div
+          className="
+            flex
+            items-start
+            gap-4
+          "
+        >
 
           <div
             className="
-            flex
-            h-11
-            w-11
-            shrink-0
-            items-center
-            justify-center
-            rounded-xl
-            bg-blue-100
-            text-blue-600
-            dark:bg-blue-500/10
-            dark:text-blue-400
+              flex
+              h-11
+              w-11
+              shrink-0
+              items-center
+              justify-center
+              rounded-xl
+              bg-blue-100
+              text-blue-600
+              dark:bg-blue-500/10
+              dark:text-blue-400
             "
           >
 
@@ -410,9 +988,9 @@ function Reports() {
 
             <h2
               className="
-              font-bold
-              text-slate-900
-              dark:text-white
+                font-bold
+                text-slate-900
+                dark:text-white
               "
             >
               Compliance Reports
@@ -420,12 +998,12 @@ function Reports() {
 
             <p
               className="
-              mt-1
-              max-w-2xl
-              text-sm
-              leading-6
-              text-slate-600
-              dark:text-slate-500
+                mt-1
+                max-w-2xl
+                text-sm
+                leading-6
+                text-slate-600
+                dark:text-slate-400
               "
             >
               Create inspection summaries from
@@ -440,35 +1018,39 @@ function Reports() {
       </div>
 
 
+      {/* -------------------------------------------- */}
+      {/* Reports Table */}
+      {/* -------------------------------------------- */}
+
       <div
         className="
-        mt-6
-        overflow-hidden
-        rounded-2xl
-        border
-        border-slate-200
-        bg-white
-        shadow-sm
-        dark:border-slate-800
-        dark:bg-slate-900
-        dark:shadow-none
+          mt-6
+          overflow-hidden
+          rounded-2xl
+          border
+          border-slate-200
+          bg-white
+          shadow-sm
+          dark:border-slate-800
+          dark:bg-slate-900
+          dark:shadow-none
         "
       >
 
         <div
           className="
-          border-b
-          border-slate-200
-          p-5
-          dark:border-slate-800
+            border-b
+            border-slate-200
+            p-5
+            dark:border-slate-800
           "
         >
 
           <h2
             className="
-            font-bold
-            text-slate-900
-            dark:text-white
+              font-bold
+              text-slate-900
+              dark:text-white
             "
           >
             Generated Reports
@@ -479,28 +1061,32 @@ function Reports() {
 
         {reports.length === 0 ? (
 
+          /* ---------------------------------------- */
+          /* Empty State */
+          /* ---------------------------------------- */
+
           <div
             className="
-            p-12
-            text-center
+              p-12
+              text-center
             "
           >
 
             <FileText
               size={40}
               className="
-              mx-auto
-              text-slate-300
-              dark:text-slate-700
+                mx-auto
+                text-slate-300
+                dark:text-slate-700
               "
             />
 
             <h3
               className="
-              mt-4
-              font-bold
-              text-slate-900
-              dark:text-white
+                mt-4
+                font-bold
+                text-slate-900
+                dark:text-white
               "
             >
               No reports generated yet
@@ -508,10 +1094,10 @@ function Reports() {
 
             <p
               className="
-              mt-2
-              text-sm
-              text-slate-600
-              dark:text-slate-500
+                mt-2
+                text-sm
+                text-slate-600
+                dark:text-slate-400
               "
             >
               Click "Generate Report" to
@@ -522,28 +1108,32 @@ function Reports() {
 
         ) : (
 
+          /* ---------------------------------------- */
+          /* Reports */
+          /* ---------------------------------------- */
+
           <div className="overflow-x-auto">
 
             <table
               className="
-              w-full
-              text-left
-              text-sm
+                w-full
+                text-left
+                text-sm
               "
             >
 
               <thead
                 className="
-                border-b
-                border-slate-200
-                bg-slate-50
-                text-xs
-                uppercase
-                tracking-wider
-                text-slate-500
-                dark:border-slate-800
-                dark:bg-slate-950
-                dark:text-slate-500
+                  border-b
+                  border-slate-200
+                  bg-slate-50
+                  text-xs
+                  uppercase
+                  tracking-wider
+                  text-slate-500
+                  dark:border-slate-800
+                  dark:bg-slate-950
+                  dark:text-slate-500
                 "
               >
 
@@ -580,136 +1170,185 @@ function Reports() {
 
               <tbody>
 
-                {reports.map(report => (
+                {reports.map(
+                  (report, index) => (
 
-                  <tr
-                    key={report.id}
-                    className="
-                    border-b
-                    border-slate-200
-                    last:border-0
-                    dark:border-slate-800
-                    "
-                  >
-
-                    <td
+                    <tr
+                      key={
+                        report?.id ||
+                        `report-${index}`
+                      }
                       className="
-                      px-5
-                      py-4
-                      font-bold
-                      text-slate-900
-                      dark:text-white
+                        border-b
+                        border-slate-200
+                        last:border-0
+                        dark:border-slate-800
+                        transition
+                        hover:bg-slate-50
+                        dark:hover:bg-slate-800/50
                       "
                     >
-                      {report.id}
-                    </td>
 
-                    <td
-                      className="
-                      px-5
-                      py-4
-                      text-slate-700
-                      dark:text-slate-200
-                      "
-                    >
-                      {report.type}
-                    </td>
+                      <td
+                        className="
+                          px-5
+                          py-4
+                          font-bold
+                          text-slate-900
+                          dark:text-white
+                        "
+                      >
+                        {report?.id ||
+                          "N/A"}
+                      </td>
 
-                    <td
-                      className="
-                      px-5
-                      py-4
-                      text-slate-500
-                      "
-                    >
-                      {report.created}
-                    </td>
 
-                    <td
-                      className="
-                      px-5
-                      py-4
-                      text-slate-700
-                      dark:text-slate-200
-                      "
-                    >
-                      {report.inspections}
-                    </td>
+                      <td
+                        className="
+                          px-5
+                          py-4
+                          text-slate-700
+                          dark:text-slate-200
+                        "
+                      >
+                        {report?.type ||
+                          "Compliance Summary"}
+                      </td>
 
-                    <td
-                      className="
-                      px-5
-                      py-4
-                      font-bold
-                      text-emerald-600
-                      dark:text-emerald-400
-                      "
-                    >
-                      {report.score}%
-                    </td>
 
-                    <td className="px-5 py-4">
-
-                      <div className="flex gap-2">
-
-                        <button
-                          onClick={() =>
-                            navigate(
-                              `/reports/view/${report.id}`
-                            )
-                          }
-                          className="
-                          rounded-lg
-                          border
-                          border-slate-300
-                          p-2
+                      <td
+                        className="
+                          px-5
+                          py-4
                           text-slate-500
-                          hover:border-blue-500
-                          hover:text-blue-500
-                          dark:border-slate-700
                           dark:text-slate-400
-                          dark:hover:text-blue-400
+                        "
+                      >
+                        {report?.created ||
+                          "N/A"}
+                      </td>
+
+
+                      <td
+                        className="
+                          px-5
+                          py-4
+                          text-slate-700
+                          dark:text-slate-200
+                        "
+                      >
+                        {Number(
+                          report?.inspections ||
+                            0
+                        )}
+                      </td>
+
+
+                      <td
+                        className="
+                          px-5
+                          py-4
+                          font-bold
+                          text-emerald-600
+                          dark:text-emerald-400
+                        "
+                      >
+                        {Number(
+                          report?.score ||
+                            0
+                        )}
+                        %
+                      </td>
+
+
+                      <td className="px-5 py-4">
+
+                        <div
+                          className="
+                            flex
+                            gap-2
                           "
-                          title="View"
                         >
 
-                          <Eye size={16} />
+                          {/* View */}
 
-                        </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (
+                                report?.id
+                              ) {
+                                navigate(
+                                  `/reports/view/${report.id}`
+                                );
+                              }
+                            }}
+                            className="
+                              rounded-lg
+                              border
+                              border-slate-300
+                              p-2
+                              text-slate-500
+                              transition
+                              hover:border-blue-500
+                              hover:bg-blue-50
+                              hover:text-blue-500
+                              dark:border-slate-700
+                              dark:text-slate-400
+                              dark:hover:bg-blue-500/10
+                              dark:hover:text-blue-400
+                            "
+                            title="View Report"
+                          >
+
+                            <Eye
+                              size={16}
+                            />
+
+                          </button>
 
 
-                        <button
-                          onClick={() =>
-                            downloadReport(
-                              report
-                            )
-                          }
-                          className="
-                          rounded-lg
-                          border
-                          border-slate-300
-                          p-2
-                          text-slate-500
-                          hover:border-emerald-500
-                          hover:text-emerald-500
-                          dark:border-slate-700
-                          dark:text-slate-400
-                          dark:hover:text-emerald-400
-                          "
-                          title="Download"
-                        >
+                          {/* Download */}
 
-                          <Download size={16} />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              downloadReport(
+                                report
+                              )
+                            }
+                            className="
+                              rounded-lg
+                              border
+                              border-slate-300
+                              p-2
+                              text-slate-500
+                              transition
+                              hover:border-emerald-500
+                              hover:bg-emerald-50
+                              hover:text-emerald-500
+                              dark:border-slate-700
+                              dark:text-slate-400
+                              dark:hover:bg-emerald-500/10
+                              dark:hover:text-emerald-400
+                            "
+                            title="Download Report"
+                          >
 
-                        </button>
+                            <Download
+                              size={16}
+                            />
 
-                      </div>
+                          </button>
 
-                    </td>
+                        </div>
 
-                  </tr>
+                      </td>
 
-                ))}
+                    </tr>
+
+                  )
+                )}
 
               </tbody>
 
@@ -722,65 +1361,87 @@ function Reports() {
       </div>
 
 
+      {/* -------------------------------------------- */}
+      {/* Generate Report Modal */}
+      {/* -------------------------------------------- */}
+
       {showModal && (
 
         <div
           className="
-          fixed
-          inset-0
-          z-[100]
-          flex
-          items-center
-          justify-center
-          bg-black/50
-          p-5
-          backdrop-blur-sm
-          dark:bg-black/80
+            fixed
+            inset-0
+            z-[100]
+            flex
+            items-center
+            justify-center
+            bg-black/50
+            p-5
+            backdrop-blur-sm
+            dark:bg-black/80
           "
+          onMouseDown={(e) => {
+            if (
+              e.target === e.currentTarget
+            ) {
+              closeModal();
+            }
+          }}
         >
 
           <div
             className="
-            w-full
-            max-w-lg
-            rounded-3xl
-            border
-            border-slate-200
-            bg-white
-            p-6
-            text-slate-900
-            shadow-2xl
-            dark:border-slate-700
-            dark:bg-slate-900
-            dark:text-white
+              w-full
+              max-w-lg
+              rounded-3xl
+              border
+              border-slate-200
+              bg-white
+              p-6
+              text-slate-900
+              shadow-2xl
+              dark:border-slate-700
+              dark:bg-slate-900
+              dark:text-white
             "
           >
 
+            {/* Modal Header */}
+
             <div
               className="
-              flex
-              items-center
-              justify-between
+                flex
+                items-center
+                justify-between
               "
             >
 
-              <h2 className="text-xl font-black">
+              <h2
+                className="
+                  text-xl
+                  font-black
+                "
+              >
                 Generate Report
               </h2>
 
+
               <button
-                onClick={() =>
-                  setShowModal(false)
+                type="button"
+                onClick={
+                  closeModal
                 }
                 className="
-                rounded-lg
-                p-2
-                text-slate-500
-                hover:bg-slate-100
-                hover:text-slate-900
-                dark:hover:bg-slate-800
-                dark:hover:text-white
+                  rounded-lg
+                  p-2
+                  text-slate-500
+                  transition
+                  hover:bg-slate-100
+                  hover:text-slate-900
+                  dark:hover:bg-slate-800
+                  dark:hover:text-white
                 "
+                title="Close"
               >
 
                 <X size={18} />
@@ -790,58 +1451,75 @@ function Reports() {
             </div>
 
 
-            <div className="mt-6 space-y-5">
+            {/* Modal Body */}
+
+            <div
+              className="
+                mt-6
+                space-y-5
+              "
+            >
+
+              {/* Report Type */}
 
               <div>
 
                 <label
+                  htmlFor="report-type"
                   className="
-                  mb-2
-                  block
-                  text-sm
-                  font-bold
+                    mb-2
+                    block
+                    text-sm
+                    font-bold
                   "
                 >
                   Report Type
                 </label>
 
+
                 <select
-                  value={reportType}
-                  onChange={e =>
+                  id="report-type"
+                  value={
+                    reportType
+                  }
+                  onChange={(e) =>
                     setReportType(
                       e.target.value
                     )
                   }
                   className="
-                  w-full
-                  rounded-xl
-                  border
-                  border-slate-300
-                  bg-white
-                  px-4
-                  py-3
-                  text-slate-900
-                  outline-none
-                  focus:border-blue-500
-                  dark:border-slate-700
-                  dark:bg-slate-950
-                  dark:text-white
+                    w-full
+                    rounded-xl
+                    border
+                    border-slate-300
+                    bg-white
+                    px-4
+                    py-3
+                    text-slate-900
+                    outline-none
+                    transition
+                    focus:border-blue-500
+                    focus:ring-2
+                    focus:ring-blue-500/20
+                    dark:border-slate-700
+                    dark:bg-slate-950
+                    dark:text-white
                   "
                 >
 
-                  <option>
+                  <option value="Compliance Summary">
                     Compliance Summary
                   </option>
 
-                  <option>
+                  <option value="Inspection Report">
                     Inspection Report
                   </option>
 
-                  <option>
+                  <option value="Risk Analysis">
                     Risk Analysis
                   </option>
 
-                  <option>
+                  <option value="Monthly Compliance Report">
                     Monthly Compliance Report
                   </option>
 
@@ -850,92 +1528,110 @@ function Reports() {
               </div>
 
 
+              {/* Dates */}
+
               <div
                 className="
-                grid
-                gap-4
-                sm:grid-cols-2
+                  grid
+                  gap-4
+                  sm:grid-cols-2
                 "
               >
+
+                {/* From */}
 
                 <div>
 
                   <label
+                    htmlFor="from-date"
                     className="
-                    mb-2
-                    block
-                    text-sm
-                    font-bold
+                      mb-2
+                      block
+                      text-sm
+                      font-bold
                     "
                   >
                     From
                   </label>
 
+
                   <input
+                    id="from-date"
                     type="date"
                     value={from}
-                    onChange={e =>
+                    onChange={(e) =>
                       setFrom(
                         e.target.value
                       )
                     }
                     className="
-                    w-full
-                    rounded-xl
-                    border
-                    border-slate-300
-                    bg-white
-                    px-4
-                    py-3
-                    text-sm
-                    text-slate-900
-                    outline-none
-                    focus:border-blue-500
-                    dark:border-slate-700
-                    dark:bg-slate-950
-                    dark:text-white
+                      w-full
+                      rounded-xl
+                      border
+                      border-slate-300
+                      bg-white
+                      px-4
+                      py-3
+                      text-sm
+                      text-slate-900
+                      outline-none
+                      transition
+                      focus:border-blue-500
+                      focus:ring-2
+                      focus:ring-blue-500/20
+                      dark:border-slate-700
+                      dark:bg-slate-950
+                      dark:text-white
                     "
                   />
 
                 </div>
 
 
+                {/* To */}
+
                 <div>
 
                   <label
+                    htmlFor="to-date"
                     className="
-                    mb-2
-                    block
-                    text-sm
-                    font-bold
+                      mb-2
+                      block
+                      text-sm
+                      font-bold
                     "
                   >
                     To
                   </label>
 
+
                   <input
+                    id="to-date"
                     type="date"
                     value={to}
-                    onChange={e =>
+                    onChange={(e) =>
                       setTo(
                         e.target.value
                       )
                     }
                     className="
-                    w-full
-                    rounded-xl
-                    border
-                    border-slate-300
-                    bg-white
-                    px-4
-                    py-3
-                    text-sm
-                    text-slate-900
-                    outline-none
-                    focus:border-blue-500
-                    dark:border-slate-700
-                    dark:bg-slate-950
-                    dark:text-white
+                      w-full
+                      rounded-xl
+                      border
+                      border-slate-300
+                      bg-white
+                      px-4
+                      py-3
+                      text-sm
+                      text-slate-900
+                      outline-none
+                      transition
+                      focus:border-blue-500
+                      focus:ring-2
+                      focus:ring-blue-500/20
+                      dark:border-slate-700
+                      dark:bg-slate-950
+                      dark:text-white
                     "
                   />
 
@@ -944,24 +1640,33 @@ function Reports() {
               </div>
 
 
+              {/* Generate */}
+
               <button
-                onClick={generateReport}
+                type="button"
+                onClick={
+                  generateReport
+                }
                 className="
-                flex
-                w-full
-                items-center
-                justify-center
-                gap-2
-                rounded-xl
-                bg-blue-600
-                py-3.5
-                font-bold
-                text-white
-                hover:bg-blue-500
+                  flex
+                  w-full
+                  items-center
+                  justify-center
+                  gap-2
+                  rounded-xl
+                  bg-blue-600
+                  py-3.5
+                  font-bold
+                  text-white
+                  transition
+                  hover:bg-blue-500
+                  active:scale-[0.99]
                 "
               >
 
-                <CheckCircle2 size={18} />
+                <CheckCircle2
+                  size={18}
+                />
 
                 Generate Report
 
@@ -976,10 +1681,7 @@ function Reports() {
       )}
 
     </div>
-
   );
 }
 
-
 export default Reports;
-

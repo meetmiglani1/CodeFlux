@@ -18,7 +18,7 @@ function Login() {
   const navigate = useNavigate();
 
   const [email, setEmail] =
-    useState("admin@legalmatrix.com");
+    useState("admin@PackSureAI.com");
 
   const [password, setPassword] =
     useState("");
@@ -39,12 +39,12 @@ function Login() {
 
     const savedPassword =
       localStorage.getItem(
-        "legalMatrixPassword"
+        "PackSureAIPassword"
       ) || "Admin@123";
 
 
     if (
-      email === "admin@legalmatrix.com" &&
+      email === "admin@PackSureAI.com" &&
       password === savedPassword
     ) {
 
@@ -470,7 +470,7 @@ function Login() {
                   dark:text-slate-600
                 "
               >
-                admin@legalmatrix.com
+                admin@PackSureAI.com
                 <br />
                 Password: Admin@123
               </p>
