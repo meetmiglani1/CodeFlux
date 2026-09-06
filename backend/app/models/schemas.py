@@ -57,4 +57,4 @@ class ProductCheckResponse(BaseModel):
 # ---- Report ----
 
 class ReportRequest(BaseModel):
-    scan_id: UUID
+    scan_id: int
